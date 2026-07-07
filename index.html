@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ContextVocab - 例句背单词</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        .animate-fade-in { animation: fadeIn 0.2s ease-out forwards; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+        .word-text {
+            max-width: 100%;
+            overflow-wrap: break-word;
+            word-break: normal;
+            hyphens: none;
+            line-height: 1.05;
+        }
+        .sentence-text {
+            overflow-wrap: anywhere;
+            word-break: normal;
+            line-height: 1.55;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 antialiased">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const WORDS_FILE = "words.json";
+
+        function splitExample(example = "") {
+            const text = String(example).replace(/\s+/g, " ").trim();
+            if (!text) return { english: "", translation: "" };
+
+            const bracketMatch = text.match(/^(.*?)[\uFF08(]([^()\uFF08\uFF09]*[\u4e00-\u9fa5][^()\uFF08\uFF09]*)[\uFF09)]\s*$/);
+            if (bracketMatch) {
+                return {
+                    english: bracketMatch[1].trim(),
+                    translation: bracketMatch[2].trim()
+                };
+            }
+
+            const chars = Array.from(text);
+            const firstChineseIndex = chars.findIndex(char => /[\u4e00-\u9fa5]/.test(char));
+            if (firstChineseIndex > 0) {
+                return {
+                    english: chars.slice(0, firstChineseIndex).join("").replace(/[\uFF08(]\s*$/, "").trim(),
+                    translation: chars.slice(firstChineseIndex).join("").replace(/^[\uFF09)]?\s*/, "").trim()
+                };
+            }
+
+            return { english: text, translation: "" };
+        }
+
+        function prepareWord(item) {
+            const parsed = splitExample(item.example);
+            return {
+                page: item.page,
+                index: item.index,
+                word: String(item.word || "").trim(),
+                meaning: String(item.meaning || "").trim(),
+                example: String(item.example || "").replace(/\s+/g, " ").trim(),
+                englishExample: parsed.english,
+                exampleTranslation: parsed.translation
+            };
+        }
+
+        function WordTitle({ children, className = "" }) {
+            return (
+                <h2 className={`word-text text-center font-extrabold tracking-normal text-slate-900 ${className}`}>
+                    {children}
+                </h2>
+            );
+        }
+
+        function App() {
+            const [view, setView] = React.useState("home");
+            const [allWords, setAllWords] = React.useState([]);
+            const [reviewQueue, setReviewQueue] = React.useState([]);
+            const [currentIndex, setCurrentIndex] = React.useState(0);
+            const [phase, setPhase] = React.useState("quiz");
+            const [needsReview, setNeedsReview] = React.useState(false);
+            const [swipeDirection, setSwipeDirection] = React.useState("none");
+            const [loading, setLoading] = React.useState(false);
+            const [browseQuery, setBrowseQuery] = React.useState("");
+
+            const currentWord = reviewQueue[currentIndex];
+
+            const loadWords = async () => {
+                if (allWords.length) return allWords;
+
+                setLoading(true);
+                try {
+                    const response = await fetch(WORDS_FILE);
+                    if (!response.ok) throw new Error("加载词库失败！请确保 words.json 和 index.html 在同一个文件夹里。");
+
+                    const wordsData = await response.json();
+                    const prepared = wordsData
+                        .filter(item => item.word && item.meaning && item.example)
+                        .map(prepareWord);
+
+                    setAllWords(prepared);
+                    return prepared;
+                } catch (error) {
+                    alert(error.message + "\n\n如果你是直接双击打开 HTML，浏览器可能会阻止读取本地 JSON。可以用本地服务器打开这个文件夹。");
+                    return [];
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const startReview = async () => {
+                const words = await loadWords();
+                if (!words.length) return;
+
+                setReviewQueue([...words].sort(() => 0.5 - Math.random()));
+                setCurrentIndex(0);
+                setPhase("quiz");
+                setNeedsReview(false);
+                setSwipeDirection("none");
+                setView("review");
+            };
+
+            const openBrowse = async () => {
+                const words = await loadWords();
+                if (!words.length) return;
+
+                setBrowseQuery("");
+                setView("browse");
+            };
+
+            React.useEffect(() => {
+                const handleKeyDown = (e) => {
+                    if (view !== "review" || loading || !currentWord) return;
+
+                    if (phase === "quiz") {
+                        if (e.key === "ArrowLeft") handleQuizDecision(false);
+                        if (e.key === "ArrowRight") handleQuizDecision(true);
+                    } else if (phase === "reveal") {
+                        if (e.key === "ArrowLeft") handleRevealDecision(false);
+                        if (e.key === "ArrowRight") handleRevealDecision(true);
+                    }
+                };
+
+                window.addEventListener("keydown", handleKeyDown);
+                return () => window.removeEventListener("keydown", handleKeyDown);
+            }, [view, currentIndex, phase, currentWord, loading, needsReview]);
+
+            const advanceWord = (shouldRequeue) => {
+                const requeue = needsReview || shouldRequeue;
+                const isLast = currentIndex >= reviewQueue.length - 1;
+
+                if (requeue) {
+                    setReviewQueue(prev => [...prev, { ...currentWord }]);
+                }
+
+                if (isLast && !requeue) {
+                    alert("本轮词库复习完成。");
+                    setView("home");
+                    return;
+                }
+
+                setCurrentIndex(prev => prev + 1);
+                setPhase("quiz");
+                setNeedsReview(false);
+            };
+
+            const handleQuizDecision = (isKnown) => {
+                setSwipeDirection(isKnown ? "right" : "left");
+                if (!isKnown) setNeedsReview(true);
+                setTimeout(() => {
+                    setSwipeDirection("none");
+                    setPhase("reveal");
+                }, 180);
+            };
+
+            const handleRevealDecision = (rememberedCorrectly) => {
+                setSwipeDirection(rememberedCorrectly ? "right" : "left");
+                setTimeout(() => {
+                    setSwipeDirection("none");
+                    advanceWord(!rememberedCorrectly);
+                }, 180);
+            };
+
+            const filteredWords = React.useMemo(() => {
+                const query = browseQuery.trim().toLowerCase();
+                if (!query) return allWords;
+
+                return allWords.filter(item => (
+                    item.word.toLowerCase().includes(query) ||
+                    item.meaning.toLowerCase().includes(query) ||
+                    item.example.toLowerCase().includes(query)
+                ));
+            }, [allWords, browseQuery]);
+
+            let cardStyle = "bg-white border-slate-100 shadow-xl";
+            if (swipeDirection === "left") cardStyle = "bg-red-50 border-red-300 scale-[0.98] shadow-md";
+            if (swipeDirection === "right") cardStyle = "bg-emerald-50 border-emerald-300 scale-[0.98] shadow-md";
+
+            return (
+                <div className="min-h-screen flex flex-col bg-gradient-to-b from-slate-50 to-slate-100">
+                    <header className="max-w-6xl w-full mx-auto px-5 md:px-6 py-5 flex justify-between items-center gap-4">
+                        <div className="flex items-center space-x-2 cursor-pointer min-w-0" onClick={() => setView("home")}>
+                            <div className="w-8 h-8 rounded-lg bg-emerald-500 flex items-center justify-center text-white font-bold shrink-0">W</div>
+                            <span className="text-xl font-bold tracking-tight text-slate-800 truncate">ContextVocab</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <button onClick={openBrowse} className="h-9 px-3 rounded-lg bg-white border border-slate-200 text-sm font-medium text-slate-600 hover:border-emerald-400 hover:text-emerald-700 transition-colors">
+                                浏览词库
+                            </button>
+                            <button onClick={startReview} className="h-9 px-3 rounded-lg bg-emerald-500 text-sm font-semibold text-white hover:bg-emerald-600 transition-colors">
+                                开始复习
+                            </button>
+                        </div>
+                    </header>
+
+                    <main className="flex-1 w-full">
+                        {view === "home" && (
+                            <div className="max-w-3xl mx-auto px-4 py-12 animate-fade-in">
+                                <div className="text-center space-y-2">
+                                    <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">用例句背单词</h1>
+                                    <p className="text-slate-500 text-sm">数据来自 words.json：一个单词、一条例句、一个释义</p>
+                                </div>
+
+                                <div className="grid md:grid-cols-2 gap-4 pt-10">
+                                    <button onClick={startReview} disabled={loading} className="text-left bg-white rounded-2xl p-6 border border-slate-200 shadow-sm hover:border-emerald-400 hover:shadow-md transition-all active:scale-[0.99] disabled:opacity-60">
+                                        <div className="flex justify-between items-start gap-4">
+                                            <h3 className="text-lg font-bold text-slate-800">开始复习</h3>
+                                            <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 font-bold rounded shrink-0">5550 词</span>
+                                        </div>
+                                        <p className="text-xs text-slate-400 mt-2">{loading ? "正在加载词库..." : "随机抽取整本词库，答错的词会回到队列末尾。"}</p>
+                                    </button>
+
+                                    <button onClick={openBrowse} disabled={loading} className="text-left bg-white rounded-2xl p-6 border border-slate-200 shadow-sm hover:border-emerald-400 hover:shadow-md transition-all active:scale-[0.99] disabled:opacity-60">
+                                        <div className="flex justify-between items-start gap-4">
+                                            <h3 className="text-lg font-bold text-slate-800">浏览整本词库</h3>
+                                            <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 font-bold rounded shrink-0">可搜索</span>
+                                        </div>
+                                        <p className="text-xs text-slate-400 mt-2">按原顺序查看单词、释义和例句。</p>
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {view === "review" && currentWord && (
+                            <div className="max-w-3xl mx-auto px-4 py-4 flex flex-col items-center space-y-5 animate-fade-in">
+                                <div className="w-full flex justify-between items-center text-xs font-semibold text-slate-400 tracking-wider px-1">
+                                    <span>单词 {currentIndex + 1} / {reviewQueue.length}</span>
+                                    <span>{currentWord.page ? `第 ${currentWord.page} 页` : "例句模式"}</span>
+                                </div>
+
+                                <div className="w-full min-h-[360px] flex items-center justify-center">
+                                    {phase === "quiz" ? (
+                                        <div className={`w-full rounded-3xl p-6 md:p-10 border min-h-[340px] flex flex-col justify-center items-center relative transition-all duration-150 ${cardStyle}`}>
+                                            <WordTitle className="text-5xl md:text-7xl mb-8">{currentWord.word}</WordTitle>
+                                            <p className="sentence-text text-lg md:text-xl font-medium text-slate-600 text-center px-2 select-none">
+                                                {currentWord.englishExample || currentWord.example}
+                                            </p>
+                                            <div className="absolute bottom-4 text-xs text-slate-400 select-none flex space-x-8 md:space-x-12">
+                                                <span>左：不认识</span>
+                                                <span>认识：右</span>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className={`w-full rounded-3xl p-6 md:p-10 border min-h-[340px] flex flex-col justify-center space-y-5 transition-all duration-150 ${cardStyle}`}>
+                                            <WordTitle className="text-4xl md:text-6xl">{currentWord.word}</WordTitle>
+
+                                            <div className="border-t border-slate-100 pt-5 space-y-4 animate-fade-in">
+                                                <div className="flex items-start space-x-2">
+                                                    <span className="text-[10px] font-bold px-1.5 py-0.5 bg-emerald-500 text-white rounded mt-0.5 shrink-0">释义</span>
+                                                    <p className="text-base md:text-lg font-semibold text-emerald-700 leading-snug">{currentWord.meaning}</p>
+                                                </div>
+
+                                                <div className="flex items-start space-x-2">
+                                                    <span className="text-[10px] font-bold px-1.5 py-0.5 bg-blue-500 text-white rounded mt-0.5 shrink-0">例句</span>
+                                                    <p className="sentence-text text-base text-slate-700">{currentWord.example}</p>
+                                                </div>
+                                            </div>
+
+                                            <div className="text-xs text-slate-400 text-center select-none flex justify-center space-x-8 pt-1">
+                                                <span>左：记错了</span>
+                                                <span>记对了：右</span>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {phase === "quiz" ? (
+                                    <div className="grid grid-cols-2 gap-4 w-full max-w-sm pt-2">
+                                        <button onClick={() => handleQuizDecision(false)} className="h-12 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 font-medium border border-red-200 transition-colors shadow-sm">
+                                            不认识
+                                        </button>
+                                        <button onClick={() => handleQuizDecision(true)} className="h-12 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-600 font-medium border border-emerald-200 transition-colors shadow-sm">
+                                            认识
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div className="grid grid-cols-2 gap-4 w-full max-w-sm pt-2">
+                                        <button onClick={() => handleRevealDecision(false)} className="h-12 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 font-medium border border-red-200 transition-colors shadow-sm">
+                                            记错了
+                                        </button>
+                                        <button onClick={() => handleRevealDecision(true)} className="h-12 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-600 font-medium border border-emerald-200 transition-colors shadow-sm">
+                                            记对了
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {view === "browse" && (
+                            <div className="max-w-6xl mx-auto px-4 pb-10 animate-fade-in">
+                                <div className="sticky top-0 z-10 bg-slate-50/95 backdrop-blur py-4 border-b border-slate-200">
+                                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                                        <div>
+                                            <h1 className="text-2xl font-extrabold text-slate-900">浏览整本词库</h1>
+                                            <p className="text-xs text-slate-400 mt-1">共 {allWords.length} 个单词，当前显示 {filteredWords.length} 个</p>
+                                        </div>
+                                        <input
+                                            value={browseQuery}
+                                            onChange={e => setBrowseQuery(e.target.value)}
+                                            placeholder="搜索单词、释义或例句"
+                                            className="h-11 w-full md:w-80 rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="grid gap-3 pt-4">
+                                    {filteredWords.map((item, idx) => (
+                                        <div key={`${item.word}-${idx}`} className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+                                            <div className="flex flex-col md:flex-row md:items-start gap-3 md:gap-5">
+                                                <div className="md:w-56 shrink-0">
+                                                    <div className="text-[11px] font-semibold text-slate-400 mb-1">
+                                                        {item.page ? `P${item.page}` : "WORD"} {item.index ? `#${item.index}` : ""}
+                                                    </div>
+                                                    <h2 className="word-text text-2xl font-extrabold text-slate-900 tracking-normal">{item.word}</h2>
+                                                </div>
+                                                <div className="flex-1 min-w-0 space-y-2">
+                                                    <p className="text-sm md:text-base font-semibold text-emerald-700 leading-snug">{item.meaning}</p>
+                                                    <p className="sentence-text text-sm text-slate-600">{item.example}</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </main>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById("root"));
+        root.render(<App />);
+    </script>
+</body>
+</html>
