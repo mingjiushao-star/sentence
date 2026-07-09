@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ContextVocab - 例句背单词</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            color-scheme: light;
+        }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #f8fafc;
+        }
+        .animate-fade-in {
+            animation: fadeIn 0.18s ease-out forwards;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .word-title {
+            max-width: 100%;
+            overflow-wrap: anywhere;
+            word-break: normal;
+            line-height: 1.03;
+            letter-spacing: 0;
+        }
+        .sentence-text {
+            overflow-wrap: anywhere;
+            word-break: normal;
+            line-height: 1.6;
+        }
+        .soft-grid {
+            background-image:
+                linear-gradient(rgba(15, 23, 42, 0.035) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(15, 23, 42, 0.035) 1px, transparent 1px);
+            background-size: 32px 32px;
+        }
+    </style>
+</head>
+<body class="text-slate-900 antialiased">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const WORDS_FILE = "words.json";
+        const STORAGE_KEY = "contextvocab.progress.v3";
+        const GROUP_SIZE = 10;
+        const REVIEW_STEPS = [
+            { label: "10 分钟", ms: 10 * 60 * 1000 },
+            { label: "1 小时", ms: 60 * 60 * 1000 },
+            { label: "1 天", ms: 24 * 60 * 60 * 1000 },
+            { label: "2 天", ms: 2 * 24 * 60 * 60 * 1000 },
+            { label: "4 天", ms: 4 * 24 * 60 * 60 * 1000 },
+            { label: "7 天", ms: 7 * 24 * 60 * 60 * 1000 },
+            { label: "15 天", ms: 15 * 24 * 60 * 60 * 1000 },
+            { label: "30 天", ms: 30 * 24 * 60 * 60 * 1000 }
+        ];
+
+        function defaultProgress() {
+            return {
+                nextNewIndex: 0,
+                sessionsCompleted: 0,
+                updatedAt: Date.now(),
+                words: {}
+            };
+        }
+
+        function normalizeProgress(value) {
+            return {
+                ...defaultProgress(),
+                ...(value || {}),
+                words: (value && value.words && typeof value.words === "object") ? value.words : {}
+            };
+        }
+
+        function readProgress() {
+            try {
+                return normalizeProgress(JSON.parse(localStorage.getItem(STORAGE_KEY)));
+            } catch (error) {
+                return defaultProgress();
+            }
+        }
+
+        function wordKey(word) {
+            return String(word || "").trim().toLowerCase();
+        }
+
+        function splitExample(example = "") {
+            const text = String(example).replace(/\s+/g, " ").trim();
+            if (!text) return { english: "", translation: "" };
+
+            const bracketMatch = text.match(/^(.*?)[\uFF08(]([^()\uFF08\uFF09]*[\u4e00-\u9fa5][^()\uFF08\uFF09]*)[\uFF09)]\s*$/);
+            if (bracketMatch) {
+                return {
+                    english: bracketMatch[1].trim(),
+                    translation: bracketMatch[2].trim()
+                };
+            }
+
+            const chars = Array.from(text);
+            const firstChineseIndex = chars.findIndex(char => /[\u4e00-\u9fa5]/.test(char));
+            if (firstChineseIndex > 0) {
+                const englishPrefix = chars.slice(0, firstChineseIndex).join("").replace(/[\uFF08(]\s*$/, "").trim();
+                if (/[A-Za-z]/.test(englishPrefix)) {
+                    return {
+                        english: englishPrefix,
+                        translation: chars.slice(firstChineseIndex).join("").replace(/^[\uFF09)]?\s*/, "").trim()
+                    };
+                }
+            }
+
+            const quotedSentence = text.match(/["“]([^"”]*[A-Za-z][^"”]*[.!?][^"”]*)["”]/);
+            if (quotedSentence) {
+                return {
+                    english: quotedSentence[1].trim(),
+                    translation: text
+                };
+            }
+
+            const embeddedSentence = text.match(/\b[A-Z][A-Za-z0-9 ,;:'’"-]+(?:[.!?]|(?=\s*[\uFF08(]))/);
+            if (embeddedSentence) {
+                return {
+                    english: embeddedSentence[0].trim(),
+                    translation: text
+                };
+            }
+
+            return { english: text, translation: "" };
+        }
+
+        function prepareWord(item) {
+            const parsed = splitExample(item.example);
+            return {
+                page: item.page,
+                index: item.index,
+                word: String(item.word || "").trim(),
+                meaning: String(item.meaning || "").trim(),
+                example: String(item.example || "").replace(/\s+/g, " ").trim(),
+                englishExample: parsed.english,
+                exampleTranslation: parsed.translation
+            };
+        }
+
+        function formatRelativeTime(timestamp, now = Date.now()) {
+            if (!timestamp) return "未安排";
+            const diff = timestamp - now;
+            if (diff <= 0) return "现在";
+
+            const minute = 60 * 1000;
+            const hour = 60 * minute;
+            const day = 24 * hour;
+
+            if (diff < hour) return `${Math.ceil(diff / minute)} 分钟后`;
+            if (diff < day) return `${Math.ceil(diff / hour)} 小时后`;
+            return `${Math.ceil(diff / day)} 天后`;
+        }
+
+        function stageLabel(level) {
+            if (typeof level !== "number" || level < 0) return "未稳定";
+            return REVIEW_STEPS[Math.min(level, REVIEW_STEPS.length - 1)].label;
+        }
+
+        function wordSizeClass(word) {
+            const length = Array.from(String(word || "")).length;
+            if (length <= 9) return "text-6xl md:text-7xl";
+            if (length <= 15) return "text-5xl md:text-6xl";
+            if (length <= 24) return "text-4xl md:text-5xl";
+            return "text-3xl md:text-4xl";
+        }
+
+        function ProgressBar({ value }) {
+            return (
+                <div className="h-2 w-full rounded-full bg-slate-200 overflow-hidden">
+                    <div className="h-full bg-emerald-500 transition-all" style={{ width: `${Math.max(0, Math.min(100, value))}%` }} />
+                </div>
+            );
+        }
+
+        function StatCard({ label, value, detail }) {
+            return (
+                <div className="rounded-lg border border-slate-200 bg-white p-4">
+                    <div className="text-xs font-semibold text-slate-400">{label}</div>
+                    <div className="mt-2 text-2xl font-extrabold text-slate-900">{value}</div>
+                    {detail && <div className="mt-1 text-xs text-slate-500">{detail}</div>}
+                </div>
+            );
+        }
+
+        function WordTitle({ word, compact = false }) {
+            return (
+                <h2 className={`word-title text-center font-extrabold text-slate-950 ${compact ? wordSizeClass(word).replace("text-6xl", "text-5xl").replace("md:text-7xl", "md:text-6xl") : wordSizeClass(word)}`}>
+                    {word}
+                </h2>
+            );
+        }
+
+        function App() {
+            const [view, setView] = React.useState("home");
+            const [allWords, setAllWords] = React.useState([]);
+            const [loading, setLoading] = React.useState(false);
+            const [progress, setProgress] = React.useState(readProgress);
+            const [now, setNow] = React.useState(Date.now());
+            const [session, setSession] = React.useState(null);
+            const [completedSession, setCompletedSession] = React.useState(null);
+            const [browseQuery, setBrowseQuery] = React.useState("");
+
+            const saveProgress = React.useCallback((updater) => {
+                setProgress(previous => {
+                    const base = normalizeProgress(previous);
+                    const next = normalizeProgress(typeof updater === "function" ? updater(base) : updater);
+                    next.updatedAt = Date.now();
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+                    return next;
+                });
+            }, []);
+
+            const loadWords = async () => {
+                if (allWords.length) return allWords;
+
+                setLoading(true);
+                try {
+                    const response = await fetch(WORDS_FILE);
+                    if (!response.ok) throw new Error("加载词库失败：请确认 words.json 和 index.html 在同一个文件夹里。");
+
+                    const data = await response.json();
+                    const prepared = data
+                        .filter(item => item.word && item.meaning && item.example)
+                        .map(prepareWord);
+
+                    setAllWords(prepared);
+                    return prepared;
+                } catch (error) {
+                    alert(error.message + "\n\n如果直接双击 HTML 后无法加载，请用本地服务器打开这个文件夹。");
+                    return [];
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            React.useEffect(() => {
+                loadWords();
+            }, []);
+
+            React.useEffect(() => {
+                const timer = setInterval(() => setNow(Date.now()), 60 * 1000);
+                return () => clearInterval(timer);
+            }, []);
+
+            const progressWords = progress.words || {};
+            const learnedCount = allWords.filter(item => progressWords[wordKey(item.word)]?.learnedAt).length;
+            const dueWords = React.useMemo(() => {
+                return allWords
+                    .filter(item => {
+                        const record = progressWords[wordKey(item.word)];
+                        return record?.dueAt && record.dueAt <= now;
+                    })
+                    .sort((a, b) => (progressWords[wordKey(a.word)]?.dueAt || 0) - (progressWords[wordKey(b.word)]?.dueAt || 0));
+            }, [allWords, progress, now]);
+            const nextNewIndex = Math.min(progress.nextNewIndex || 0, allWords.length);
+            const remainingNew = Math.max(allWords.length - nextNewIndex, 0);
+            const learnedPercent = allWords.length ? Math.round((learnedCount / allWords.length) * 100) : 0;
+
+            const startStudyGroup = async (forcedStart = null) => {
+                const words = await loadWords();
+                if (!words.length) return;
+
+                const start = Math.max(0, Math.min(typeof forcedStart === "number" ? forcedStart : (progress.nextNewIndex || 0), words.length));
+                const group = words.slice(start, start + GROUP_SIZE);
+
+                if (!group.length) {
+                    alert("新词已经学完了，可以去复习或浏览词库。");
+                    return;
+                }
+
+                setSession({
+                    type: "learn",
+                    phase: "study",
+                    groupStart: start,
+                    originalCount: group.length,
+                    words: group,
+                    cursor: 0,
+                    results: { correct: 0, wrong: 0 }
+                });
+                setCompletedSession(null);
+                setView("session");
+            };
+
+            const startDueReview = async () => {
+                const words = await loadWords();
+                if (!words.length) return;
+
+                const due = words
+                    .filter(item => {
+                        const record = progress.words?.[wordKey(item.word)];
+                        return record?.dueAt && record.dueAt <= Date.now();
+                    })
+                    .sort((a, b) => (progress.words?.[wordKey(a.word)]?.dueAt || 0) - (progress.words?.[wordKey(b.word)]?.dueAt || 0))
+                    .slice(0, GROUP_SIZE);
+
+                if (!due.length) {
+                    alert("现在没有到期复习的单词。");
+                    return;
+                }
+
+                setSession({
+                    type: "review",
+                    phase: "quiz",
+                    groupStart: 0,
+                    originalCount: due.length,
+                    words: due,
+                    cursor: 0,
+                    results: { correct: 0, wrong: 0 }
+                });
+                setCompletedSession(null);
+                setView("session");
+            };
+
+            const openBrowse = async () => {
+                const words = await loadWords();
+                if (!words.length) return;
+
+                setBrowseQuery("");
+                setView("browse");
+            };
+
+            const resetProgress = () => {
+                if (!window.confirm("确定要清空学习进度吗？词库文件不会被修改。")) return;
+                const fresh = defaultProgress();
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(fresh));
+                setProgress(fresh);
+                setSession(null);
+                setCompletedSession(null);
+                setView("home");
+            };
+
+            const activeWord = session?.words?.[session.cursor];
+
+            const moveStudyForward = () => {
+                setSession(previous => {
+                    if (!previous) return previous;
+                    if (previous.cursor < previous.originalCount - 1) {
+                        return { ...previous, cursor: previous.cursor + 1 };
+                    }
+                    return { ...previous, phase: "quiz", cursor: 0 };
+                });
+            };
+
+            const showAnswer = () => {
+                setSession(previous => previous ? { ...previous, phase: "reveal" } : previous);
+            };
+
+            const recordWordResult = (word, remembered, type) => {
+                saveProgress(previous => {
+                    const key = wordKey(word.word);
+                    const oldRecord = previous.words[key] || {};
+                    let level = typeof oldRecord.level === "number" ? oldRecord.level : -1;
+                    let dueAt = oldRecord.dueAt || 0;
+                    let learnedAt = oldRecord.learnedAt;
+
+                    if (remembered) {
+                        level = Math.min(level + 1, REVIEW_STEPS.length - 1);
+                        dueAt = Date.now() + REVIEW_STEPS[level].ms;
+                        learnedAt = learnedAt || Date.now();
+                    } else if (type === "review") {
+                        level = 0;
+                        dueAt = Date.now() + REVIEW_STEPS[0].ms;
+                        learnedAt = learnedAt || Date.now();
+                    } else {
+                        level = -1;
+                        dueAt = 0;
+                    }
+
+                    return {
+                        ...previous,
+                        words: {
+                            ...previous.words,
+                            [key]: {
+                                ...oldRecord,
+                                word: word.word,
+                                level,
+                                dueAt,
+                                learnedAt,
+                                lastReviewedAt: Date.now(),
+                                correct: (oldRecord.correct || 0) + (remembered ? 1 : 0),
+                                wrong: (oldRecord.wrong || 0) + (remembered ? 0 : 1)
+                            }
+                        }
+                    };
+                });
+            };
+
+            const completeSession = (nextSession) => {
+                if (nextSession.type === "learn") {
+                    saveProgress(previous => ({
+                        ...previous,
+                        nextNewIndex: Math.max(previous.nextNewIndex || 0, nextSession.groupStart + nextSession.originalCount),
+                        sessionsCompleted: (previous.sessionsCompleted || 0) + 1
+                    }));
+                } else {
+                    saveProgress(previous => ({
+                        ...previous,
+                        sessionsCompleted: (previous.sessionsCompleted || 0) + 1
+                    }));
+                }
+
+                setCompletedSession(nextSession);
+                setSession(null);
+                setView("done");
+            };
+
+            const submitRecall = (remembered) => {
+                if (!session || !activeWord) return;
+
+                recordWordResult(activeWord, remembered, session.type);
+
+                const nextWords = remembered ? session.words : [...session.words, activeWord];
+                const nextCursor = session.cursor + 1;
+                const nextSession = {
+                    ...session,
+                    words: nextWords,
+                    cursor: nextCursor,
+                    phase: "quiz",
+                    results: {
+                        correct: session.results.correct + (remembered ? 1 : 0),
+                        wrong: session.results.wrong + (remembered ? 0 : 1)
+                    }
+                };
+
+                if (nextCursor >= nextWords.length) {
+                    completeSession(nextSession);
+                } else {
+                    setSession(nextSession);
+                }
+            };
+
+            const filteredWords = React.useMemo(() => {
+                const query = browseQuery.trim().toLowerCase();
+                if (!query) return allWords;
+
+                return allWords.filter(item => (
+                    item.word.toLowerCase().includes(query) ||
+                    item.meaning.toLowerCase().includes(query) ||
+                    item.example.toLowerCase().includes(query)
+                ));
+            }, [allWords, browseQuery]);
+
+            const getBrowseStatus = (item) => {
+                const record = progressWords[wordKey(item.word)];
+                if (!record?.learnedAt) return { label: "未学", tone: "slate" };
+                if (record.dueAt && record.dueAt <= now) return { label: "待复习", tone: "amber" };
+                return { label: `${stageLabel(record.level)} · ${formatRelativeTime(record.dueAt, now)}`, tone: "emerald" };
+            };
+
+            const sessionPosition = session ? Math.min(session.cursor + 1, session.words.length) : 0;
+            const sessionProgress = session ? (sessionPosition / Math.max(session.words.length, 1)) * 100 : 0;
+
+            return (
+                <div className="min-h-screen soft-grid">
+                    <header className="border-b border-slate-200/80 bg-white/85 backdrop-blur">
+                        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-4">
+                            <button onClick={() => setView("home")} className="flex min-w-0 items-center gap-2 text-left">
+                                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-950 text-sm font-bold text-white">C</div>
+                                <div className="min-w-0">
+                                    <div className="truncate text-sm font-extrabold text-slate-950">ContextVocab</div>
+                                    <div className="text-[11px] font-medium text-slate-400">Sentence-first vocabulary</div>
+                                </div>
+                            </button>
+                            <div className="flex items-center gap-2">
+                                <button onClick={openBrowse} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-600 transition hover:border-slate-400">
+                                    浏览
+                                </button>
+                                <button onClick={() => startDueReview()} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-600 transition hover:border-amber-400">
+                                    复习
+                                </button>
+                                <button onClick={() => startStudyGroup()} className="h-9 rounded-lg bg-slate-950 px-3 text-sm font-semibold text-white transition hover:bg-slate-800">
+                                    学习
+                                </button>
+                            </div>
+                        </div>
+                    </header>
+
+                    <main className="mx-auto w-full max-w-6xl px-5 py-6">
+                        {view === "home" && (
+                            <div className="animate-fade-in space-y-6">
+                                <section className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
+                                    <div className="rounded-lg border border-slate-200 bg-white p-6 md:p-8">
+                                        <div className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-600">Sentence first</div>
+                                        <h1 className="mt-3 max-w-2xl text-3xl font-extrabold tracking-normal text-slate-950 md:text-5xl">
+                                            先进入语境，再记住单词。
+                                        </h1>
+                                        <p className="mt-4 max-w-2xl text-sm leading-6 text-slate-500">
+                                            每组 10 个词。先学习新词，再做本组检测；复习按艾宾浩斯间隔自动安排，到期后进入复习队列。
+                                        </p>
+                                        <div className="mt-6 flex flex-wrap gap-3">
+                                            <button onClick={() => startStudyGroup()} disabled={loading || !remainingNew} className="h-11 rounded-lg bg-slate-950 px-5 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40">
+                                                学习新的一组
+                                            </button>
+                                            <button onClick={() => startDueReview()} disabled={loading || !dueWords.length} className="h-11 rounded-lg border border-slate-200 bg-white px-5 text-sm font-bold text-slate-700 transition hover:border-amber-400 disabled:cursor-not-allowed disabled:opacity-40">
+                                                复习到期单词
+                                            </button>
+                                            <button onClick={openBrowse} className="h-11 rounded-lg border border-slate-200 bg-white px-5 text-sm font-bold text-slate-700 transition hover:border-emerald-400">
+                                                浏览词库
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div className="rounded-lg border border-slate-200 bg-white p-6">
+                                        <div className="flex items-center justify-between">
+                                            <div>
+                                                <div className="text-xs font-semibold text-slate-400">学习进度</div>
+                                                <div className="mt-1 text-2xl font-extrabold text-slate-950">{learnedPercent}%</div>
+                                            </div>
+                                            <div className="text-right text-xs text-slate-400">
+                                                <div>{learnedCount} / {allWords.length || 5550}</div>
+                                                <div>已进入复习曲线</div>
+                                            </div>
+                                        </div>
+                                        <div className="mt-4">
+                                            <ProgressBar value={learnedPercent} />
+                                        </div>
+                                        <div className="mt-5 grid grid-cols-3 gap-2">
+                                            <StatCard label="待复习" value={dueWords.length} detail="当前到期" />
+                                            <StatCard label="新词" value={remainingNew} detail="剩余" />
+                                            <StatCard label="完成组" value={progress.sessionsCompleted || 0} detail="本机记录" />
+                                        </div>
+                                    </div>
+                                </section>
+
+                                <section className="grid gap-4 md:grid-cols-3">
+                                    <button onClick={() => startStudyGroup()} className="rounded-lg border border-slate-200 bg-white p-5 text-left transition hover:border-slate-400 hover:shadow-sm">
+                                        <div className="text-sm font-extrabold text-slate-950">学习环节</div>
+                                        <p className="mt-2 text-sm leading-6 text-slate-500">先看单词、释义和完整例句，建立语境印象。</p>
+                                    </button>
+                                    <button onClick={() => startDueReview()} className="rounded-lg border border-slate-200 bg-white p-5 text-left transition hover:border-amber-400 hover:shadow-sm">
+                                        <div className="text-sm font-extrabold text-slate-950">复习环节</div>
+                                        <p className="mt-2 text-sm leading-6 text-slate-500">每次到期抽取 10 个词，答错会在本组再次出现。</p>
+                                    </button>
+                                    <div className="rounded-lg border border-slate-200 bg-white p-5">
+                                        <div className="flex items-center justify-between gap-3">
+                                            <div className="text-sm font-extrabold text-slate-950">艾宾浩斯间隔</div>
+                                            <button onClick={resetProgress} className="text-xs font-semibold text-slate-400 hover:text-red-500">重置进度</button>
+                                        </div>
+                                        <div className="mt-3 flex flex-wrap gap-2">
+                                            {REVIEW_STEPS.map(step => (
+                                                <span key={step.label} className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-500">
+                                                    {step.label}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </section>
+                            </div>
+                        )}
+
+                        {view === "session" && session && activeWord && (
+                            <div className="animate-fade-in mx-auto max-w-3xl space-y-5">
+                                <div className="rounded-lg border border-slate-200 bg-white p-4">
+                                    <div className="flex items-center justify-between gap-4 text-xs font-semibold text-slate-400">
+                                        <span>{session.type === "learn" ? "学习新词" : "到期复习"}</span>
+                                        <span>{sessionPosition} / {session.words.length}</span>
+                                    </div>
+                                    <div className="mt-3">
+                                        <ProgressBar value={sessionProgress} />
+                                    </div>
+                                </div>
+
+                                {session.phase === "study" && (
+                                    <section className="rounded-lg border border-slate-200 bg-white p-6 md:p-8">
+                                        <div className="text-center">
+                                            <div className="text-xs font-bold text-emerald-600">新词 {session.cursor + 1} / {session.originalCount}</div>
+                                            <div className="mt-5">
+                                                <WordTitle word={activeWord.word} />
+                                            </div>
+                                        </div>
+                                        <div className="mt-8 space-y-4 border-t border-slate-100 pt-5">
+                                            <div className="flex items-start gap-3">
+                                                <span className="mt-0.5 rounded-md bg-emerald-500 px-2 py-1 text-[11px] font-bold text-white">释义</span>
+                                                <p className="text-base font-semibold leading-7 text-emerald-700">{activeWord.meaning}</p>
+                                            </div>
+                                            <div className="flex items-start gap-3">
+                                                <span className="mt-0.5 rounded-md bg-slate-900 px-2 py-1 text-[11px] font-bold text-white">例句</span>
+                                                <p className="sentence-text text-base text-slate-700">{activeWord.example}</p>
+                                            </div>
+                                        </div>
+                                        <div className="mt-6 flex justify-end">
+                                            <button onClick={moveStudyForward} className="h-11 rounded-lg bg-slate-950 px-5 text-sm font-bold text-white transition hover:bg-slate-800">
+                                                {session.cursor < session.originalCount - 1 ? "下一个" : "开始本组检测"}
+                                            </button>
+                                        </div>
+                                    </section>
+                                )}
+
+                                {session.phase === "quiz" && (
+                                    <section className="rounded-lg border border-slate-200 bg-white p-6 md:p-8">
+                                        <div className="text-center">
+                                            <div className="text-xs font-bold text-slate-400">{session.type === "learn" ? "本组检测" : "复习检测"}</div>
+                                            <div className="mt-5">
+                                                <WordTitle word={activeWord.word} />
+                                            </div>
+                                            <p className="sentence-text mx-auto mt-7 max-w-2xl text-lg font-medium text-slate-600 md:text-xl">
+                                                {activeWord.englishExample || activeWord.example}
+                                            </p>
+                                        </div>
+                                        <div className="mt-8 flex justify-center">
+                                            <button onClick={showAnswer} className="h-11 rounded-lg bg-slate-950 px-6 text-sm font-bold text-white transition hover:bg-slate-800">
+                                                查看释义和完整例句
+                                            </button>
+                                        </div>
+                                    </section>
+                                )}
+
+                                {session.phase === "reveal" && (
+                                    <section className="rounded-lg border border-slate-200 bg-white p-6 md:p-8">
+                                        <div className="text-center">
+                                            <WordTitle word={activeWord.word} compact />
+                                        </div>
+                                        <div className="mt-7 space-y-4 border-t border-slate-100 pt-5">
+                                            <div className="flex items-start gap-3">
+                                                <span className="mt-0.5 rounded-md bg-emerald-500 px-2 py-1 text-[11px] font-bold text-white">释义</span>
+                                                <p className="text-base font-semibold leading-7 text-emerald-700">{activeWord.meaning}</p>
+                                            </div>
+                                            <div className="flex items-start gap-3">
+                                                <span className="mt-0.5 rounded-md bg-slate-900 px-2 py-1 text-[11px] font-bold text-white">例句</span>
+                                                <p className="sentence-text text-base text-slate-700">{activeWord.example}</p>
+                                            </div>
+                                            {activeWord.exampleTranslation && (
+                                                <div className="flex items-start gap-3">
+                                                    <span className="mt-0.5 rounded-md bg-blue-500 px-2 py-1 text-[11px] font-bold text-white">翻译</span>
+                                                    <p className="text-base leading-7 text-slate-600">{activeWord.exampleTranslation}</p>
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="mt-7 grid grid-cols-2 gap-3">
+                                            <button onClick={() => submitRecall(false)} className="h-12 rounded-lg border border-red-200 bg-red-50 text-sm font-bold text-red-600 transition hover:bg-red-100">
+                                                模糊
+                                            </button>
+                                            <button onClick={() => submitRecall(true)} className="h-12 rounded-lg border border-emerald-200 bg-emerald-50 text-sm font-bold text-emerald-700 transition hover:bg-emerald-100">
+                                                掌握
+                                            </button>
+                                        </div>
+                                    </section>
+                                )}
+                            </div>
+                        )}
+
+                        {view === "done" && completedSession && (
+                            <div className="animate-fade-in mx-auto max-w-xl rounded-lg border border-slate-200 bg-white p-7 text-center">
+                                <div className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-600">Group complete</div>
+                                <h1 className="mt-3 text-3xl font-extrabold text-slate-950">
+                                    {completedSession.type === "learn" ? "这一组学完了" : "这一组复习完了"}
+                                </h1>
+                                <div className="mt-6 grid grid-cols-2 gap-3">
+                                    <StatCard label="掌握" value={completedSession.results.correct} detail="本组作答" />
+                                    <StatCard label="模糊" value={completedSession.results.wrong} detail="已重新安排" />
+                                </div>
+                                <div className="mt-7 grid grid-cols-2 gap-3">
+                                    <button onClick={() => setView("home")} className="h-12 rounded-lg border border-slate-200 bg-white text-sm font-bold text-slate-700 transition hover:border-slate-400">
+                                        返回首页
+                                    </button>
+                                    <button
+                                        onClick={() => completedSession.type === "learn" ? startStudyGroup(completedSession.groupStart + completedSession.originalCount) : startDueReview()}
+                                        className="h-12 rounded-lg bg-slate-950 text-sm font-bold text-white transition hover:bg-slate-800"
+                                    >
+                                        {completedSession.type === "learn" ? "下一组" : "继续复习"}
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {view === "browse" && (
+                            <div className="animate-fade-in space-y-4">
+                                <section className="sticky top-0 z-10 rounded-lg border border-slate-200 bg-white/95 p-4 backdrop-blur">
+                                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                                        <div>
+                                            <h1 className="text-2xl font-extrabold text-slate-950">浏览整本词库</h1>
+                                            <p className="mt-1 text-xs font-medium text-slate-400">共 {allWords.length || 5550} 个单词，当前显示 {filteredWords.length} 个</p>
+                                        </div>
+                                        <input
+                                            value={browseQuery}
+                                            onChange={event => setBrowseQuery(event.target.value)}
+                                            placeholder="搜索单词、释义或例句"
+                                            className="h-11 w-full rounded-lg border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100 md:w-96"
+                                        />
+                                    </div>
+                                </section>
+
+                                <section className="grid gap-3">
+                                    {filteredWords.map((item, idx) => {
+                                        const status = getBrowseStatus(item);
+                                        const toneClass = status.tone === "amber"
+                                            ? "bg-amber-50 text-amber-700 border-amber-200"
+                                            : status.tone === "emerald"
+                                                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                                : "bg-slate-50 text-slate-500 border-slate-200";
+
+                                        return (
+                                            <div key={`${item.word}-${idx}`} className="rounded-lg border border-slate-200 bg-white p-4">
+                                                <div className="grid gap-3 md:grid-cols-[220px_1fr] md:gap-6">
+                                                    <div className="min-w-0">
+                                                        <div className="mb-2 flex flex-wrap items-center gap-2">
+                                                            <span className="text-[11px] font-bold text-slate-400">{item.page ? `P${item.page}` : "WORD"} {item.index ? `#${item.index}` : ""}</span>
+                                                            <span className={`rounded-md border px-2 py-0.5 text-[11px] font-bold ${toneClass}`}>{status.label}</span>
+                                                        </div>
+                                                        <h2 className="word-title text-2xl font-extrabold text-slate-950">{item.word}</h2>
+                                                    </div>
+                                                    <div className="min-w-0 space-y-2">
+                                                        <p className="text-sm font-semibold leading-6 text-emerald-700">{item.meaning}</p>
+                                                        <p className="sentence-text text-sm text-slate-600">{item.example}</p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </section>
+                            </div>
+                        )}
+                    </main>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById("root"));
+        root.render(<App />);
+    </script>
+</body>
+</html>
