@@ -135,6 +135,7 @@
 
         function prepareWord(item) {
             const parsed = splitExample(item.example);
+            const storedTranslation = String(item.exampleTranslation || item.exampleMeaning || "").replace(/\s+/g, " ").trim();
             return {
                 page: item.page,
                 index: item.index,
@@ -142,7 +143,7 @@
                 meaning: String(item.meaning || "").trim(),
                 example: String(item.example || "").replace(/\s+/g, " ").trim(),
                 englishExample: parsed.english,
-                exampleTranslation: parsed.translation
+                exampleTranslation: storedTranslation || parsed.translation
             };
         }
 
@@ -219,7 +220,7 @@
                 <p className={className}>
                     {parts.map((part, index) => (
                         part.toLowerCase() === targetLower
-                            ? <span key={`${part}-${index}`} className="font-extrabold text-emerald-800">{part}</span>
+                            ? <span key={`${part}-${index}`} className="font-extrabold text-green-600">{part}</span>
                             : <React.Fragment key={`${part}-${index}`}>{part}</React.Fragment>
                     ))}
                 </p>
@@ -680,6 +681,12 @@
                                                     className="sentence-text text-base text-slate-700"
                                                 />
                                             </div>
+                                            {activeWord.exampleTranslation && (
+                                                <div className="flex items-start gap-3">
+                                                    <span className="mt-0.5 rounded-md bg-blue-500 px-2 py-1 text-[11px] font-bold text-white">释义</span>
+                                                    <p className="text-base leading-7 text-slate-600">{activeWord.exampleTranslation}</p>
+                                                </div>
+                                            )}
                                         </div>
                                         {session.lastGuess ? (
                                             <div className="mt-7 grid gap-3 sm:grid-cols-[0.8fr_1fr_1fr]">
