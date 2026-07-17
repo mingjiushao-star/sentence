@@ -219,7 +219,7 @@
                 <p className={className}>
                     {parts.map((part, index) => (
                         part.toLowerCase() === targetLower
-                            ? <mark key={`${part}-${index}`} className="rounded bg-amber-100 px-1 font-extrabold text-amber-700">{part}</mark>
+                            ? <span key={`${part}-${index}`} className="font-extrabold text-emerald-800">{part}</span>
                             : <React.Fragment key={`${part}-${index}`}>{part}</React.Fragment>
                     ))}
                 </p>
@@ -379,8 +379,8 @@
                 }
             };
 
-            const showAnswer = () => {
-                setSession(previous => previous ? { ...previous, phase: "reveal", lastGuess: true } : previous);
+            const showAnswer = (knows) => {
+                setSession(previous => previous ? { ...previous, phase: "reveal", lastGuess: knows } : previous);
             };
 
             const recordWordResult = (word, remembered, type, resetCycle = false) => {
@@ -490,13 +490,14 @@
 
                     if (event.key === "ArrowRight") {
                         event.preventDefault();
-                        if (session.phase === "quiz") showAnswer();
-                        if (session.phase === "reveal") submitRecall(true);
+                        if (session.phase === "quiz") showAnswer(true);
+                        if (session.phase === "reveal") submitRecall(session.lastGuess ? true : false);
                     }
 
                     if (event.key === "ArrowLeft") {
                         event.preventDefault();
-                        submitRecall(false);
+                        if (session.phase === "quiz") showAnswer(false);
+                        if (session.phase === "reveal") submitRecall(false);
                     }
                 };
 
@@ -651,10 +652,10 @@
                                             />
                                         </div>
                                         <div className="mt-8 grid grid-cols-2 gap-3">
-                                            <button onClick={() => submitRecall(false)} className="h-12 rounded-lg border border-red-200 bg-red-50 text-sm font-bold text-red-600 transition hover:bg-red-100">
+                                            <button onClick={() => showAnswer(false)} className="h-12 rounded-lg border border-red-200 bg-red-50 text-sm font-bold text-red-600 transition hover:bg-red-100">
                                                 不认识
                                             </button>
-                                            <button onClick={showAnswer} className="h-12 rounded-lg border border-emerald-200 bg-emerald-50 text-sm font-bold text-emerald-700 transition hover:bg-emerald-100">
+                                            <button onClick={() => showAnswer(true)} className="h-12 rounded-lg border border-emerald-200 bg-emerald-50 text-sm font-bold text-emerald-700 transition hover:bg-emerald-100">
                                                 认识
                                             </button>
                                         </div>
@@ -679,24 +680,29 @@
                                                     className="sentence-text text-base text-slate-700"
                                                 />
                                             </div>
-                                            {activeWord.exampleTranslation && (
-                                                <div className="flex items-start gap-3">
-                                                    <span className="mt-0.5 rounded-md bg-blue-500 px-2 py-1 text-[11px] font-bold text-white">翻译</span>
-                                                    <p className="text-base leading-7 text-slate-600">{activeWord.exampleTranslation}</p>
-                                                </div>
-                                            )}
                                         </div>
-                                        <div className="mt-7 grid gap-3 sm:grid-cols-[0.8fr_1fr_1fr]">
-                                            <button onClick={() => setSession(previous => previous ? { ...previous, phase: "quiz", lastGuess: null } : previous)} className="h-12 rounded-lg border border-slate-200 bg-white text-sm font-bold text-slate-600 transition hover:border-slate-400">
-                                                返回句子
-                                            </button>
-                                            <button onClick={() => submitRecall(false)} className="h-12 rounded-lg border border-red-200 bg-red-50 text-sm font-bold text-red-600 transition hover:bg-red-100">
-                                                记错了
-                                            </button>
-                                            <button onClick={() => submitRecall(true)} className="h-12 rounded-lg border border-emerald-200 bg-emerald-50 text-sm font-bold text-emerald-700 transition hover:bg-emerald-100">
-                                                记对了
-                                            </button>
-                                        </div>
+                                        {session.lastGuess ? (
+                                            <div className="mt-7 grid gap-3 sm:grid-cols-[0.8fr_1fr_1fr]">
+                                                <button onClick={() => setSession(previous => previous ? { ...previous, phase: "quiz", lastGuess: null } : previous)} className="h-12 rounded-lg border border-slate-200 bg-white text-sm font-bold text-slate-600 transition hover:border-slate-400">
+                                                    返回句子
+                                                </button>
+                                                <button onClick={() => submitRecall(false)} className="h-12 rounded-lg border border-red-200 bg-red-50 text-sm font-bold text-red-600 transition hover:bg-red-100">
+                                                    记错了
+                                                </button>
+                                                <button onClick={() => submitRecall(true)} className="h-12 rounded-lg border border-emerald-200 bg-emerald-50 text-sm font-bold text-emerald-700 transition hover:bg-emerald-100">
+                                                    记对了
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <div className="mt-7 grid gap-3 sm:grid-cols-[0.8fr_1.2fr]">
+                                                <button onClick={() => setSession(previous => previous ? { ...previous, phase: "quiz", lastGuess: null } : previous)} className="h-12 rounded-lg border border-slate-200 bg-white text-sm font-bold text-slate-600 transition hover:border-slate-400">
+                                                    返回句子
+                                                </button>
+                                                <button onClick={() => submitRecall(false)} className="h-12 rounded-lg bg-slate-950 text-sm font-bold text-white transition hover:bg-slate-800">
+                                                    下一个
+                                                </button>
+                                            </div>
+                                        )}
                                     </section>
                                 )}
                             </div>
