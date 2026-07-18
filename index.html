@@ -99,26 +99,6 @@
         .logo-shell:hover {
             transform: rotate(-1deg) scale(1.03);
         }
-        .quiz-word-chip {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            max-width: 100%;
-            border-radius: 999px;
-            border: 1px solid rgba(16, 185, 129, 0.18);
-            background: rgba(240, 253, 244, 0.82);
-            padding: 0.45rem 1rem;
-            font-size: clamp(1.1rem, 2.2vw, 1.65rem);
-            font-weight: 800;
-            color: #065f46;
-            overflow-wrap: anywhere;
-        }
-        .quiz-sentence {
-            font-size: clamp(2rem, 5vw, 3.85rem);
-            line-height: 1.22;
-            font-weight: 850;
-            color: #0f172a;
-        }
         .primary-action {
             box-shadow: 0 16px 36px -22px rgba(15, 23, 42, 0.8);
         }
@@ -789,12 +769,12 @@
                                         <div className="text-center">
                                             <div className="text-xs font-bold text-slate-400">{session.type === "learn" ? "新词判断" : "复习判断"}</div>
                                             <div className="mt-5">
-                                                <div className="quiz-word-chip">{activeWord.word}</div>
+                                                <WordTitle word={activeWord.word} compact />
                                             </div>
                                             <HighlightedSentence
                                                 text={activeWord.englishExample || activeWord.example}
                                                 word={activeWord.word}
-                                                className="sentence-text quiz-sentence mx-auto mt-8 max-w-3xl"
+                                                className="sentence-text mx-auto mt-7 max-w-2xl text-lg font-semibold text-slate-700 md:text-xl"
                                             />
                                         </div>
                                         <div className="mt-8 grid grid-cols-2 gap-3">
