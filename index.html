@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="sentence 用句子记住单词，并按复习周期自动提醒。">
-    <title>sentence - 用句子记住单词</title>
+    <meta name="description" content="sentence 词存于句，义生于境。Words live in sentences.">
+    <title>sentence - 词存于句，义生于境</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
@@ -653,7 +653,7 @@
                                 </div>
                                 <div className="min-w-0">
                                     <div className="truncate text-sm font-extrabold text-slate-950">sentence</div>
-                                    <div className="text-[11px] font-medium text-slate-400">Learn words in sentence</div>
+                                    <div className="text-[11px] font-medium text-slate-400">Words live in sentences.</div>
                                 </div>
                             </button>
                             <div className="flex items-center gap-2">
@@ -695,8 +695,11 @@
                                     <div className="card-surface hero-surface rounded-lg p-6 md:p-8">
                                         <div className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-600">sentence</div>
                                         <h1 className="mt-3 max-w-2xl text-3xl font-extrabold tracking-normal text-slate-950 md:text-5xl">
-                                            用句子记住单词。
+                                            词存于句，义生于境
                                         </h1>
+                                        <p className="mt-3 max-w-2xl text-lg font-semibold leading-7 text-emerald-700">
+                                            Words live in sentences.
+                                        </p>
                                         <p className="mt-4 max-w-2xl text-sm leading-6 text-slate-500">
                                             每组 10 个词。先读句子判断熟悉度，再查看释义确认记忆；背过的词会自动进入复习队列，到期后继续提醒。
                                         </p>
@@ -768,13 +771,10 @@
                                     <section className="card-surface rounded-lg p-6 md:p-8">
                                         <div className="text-center">
                                             <div className="text-xs font-bold text-slate-400">{session.type === "learn" ? "新词判断" : "复习判断"}</div>
-                                            <div className="mt-5">
-                                                <WordTitle word={activeWord.word} compact />
-                                            </div>
                                             <HighlightedSentence
                                                 text={activeWord.englishExample || activeWord.example}
                                                 word={activeWord.word}
-                                                className="sentence-text mx-auto mt-7 max-w-2xl text-lg font-semibold text-slate-700 md:text-xl"
+                                                className="sentence-text mx-auto mt-7 max-w-2xl text-xl font-semibold text-slate-800 md:text-2xl"
                                             />
                                         </div>
                                         <div className="mt-8 grid grid-cols-2 gap-3">
